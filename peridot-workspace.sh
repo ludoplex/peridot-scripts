@@ -1,23 +1,15 @@
 #!/bin/bash
-# Peridot Workspace — tmux layout for autonomous multi-VLAN LAN management
-# Full infrastructure visibility per SOUL.md and TOOLS.md
+# Peridot Workspace — tmux layout for autonomous LAN management
+# Configure via ~/.config/peridot/peridot.conf or peridot.conf.example
 # Usage: bash ~/workspace/scripts/peridot-workspace.sh
-# To reattach: tmux attach -t peridot
+# To reattach: tmux attach -t $TMUX_SESSION
 
-SESSION="peridot"
-AW_DIR="$HOME/workspace/activitywatch"
-AW_BIN="$AW_DIR/dist/activitywatch/aw-server/aw-server"
-AW_ZIP="/tmp/aw.zip"
-KUMA_DIR="$HOME/workspace/uptime-kuma"
-INSP_DIR="$HOME/workspace/inspector"
-SPEC_DIR="$HOME/workspace/OpenSpec"
-SPEC_BIN="node $SPEC_DIR/bin/openspec.js"
-MEM0_DIR="$HOME/workspace/mem0"
-LOGDIR="$HOME/workspace/logs"
-OC_HOME="$HOME/.openclaw"
-LW_DB="$HOME/workspace/clopus-watcher/data/lan-watcher.db"
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+source "$SCRIPT_DIR/lib/load-config.sh"
 
-mkdir -p "$LOGDIR"
+SESSION="$TMUX_SESSION"
+INSP_DIR="$INSPECTOR_DIR"
+SPEC_DIR="$OPENSPEC_DIR"
 
 tmux kill-session -t "$SESSION" 2>/dev/null
 sleep 1
@@ -25,8 +17,8 @@ sleep 1
 # ═══════════════════════════════════════════════════════════════════
 # WINDOW 0: peridot — OpenClaw agent chat (full window)
 # ═══════════════════════════════════════════════════════════════════
-tmux new-session -d -s "$SESSION" -n "peridot" -x 220 -y 55
-tmux send-keys -t "$SESSION:peridot" 'openclaw agent --agent main' Enter
+tmux new-session -d -s "$SESSION" -n "$PERIDOT_NAME" -x "$TMUX_WIDTH" -y "$TMUX_HEIGHT"
+tmux send-keys -t "$SESSION:$PERIDOT_NAME" "openclaw agent --agent $PERIDOT_AGENT_ID" Enter
 
 # ═══════════════════════════════════════════════════════════════════
 # WINDOW 1: services — Core monitoring stack
@@ -178,19 +170,16 @@ tmux new-window -t "$SESSION:3" -n "network"
 tmux send-keys -t "$SESSION:network.0" "\
 watch -n10 'echo \"=== VLAN Gateway Reachability ===\"
 echo \"--- Core ---\"
-ping -c1 -W2 192.168.1.1 >/dev/null 2>&1 && echo \"  OK  Router       192.168.1.1\" || echo \"  XX  Router       192.168.1.1  DOWN\"
-ping -c1 -W2 1.1.1.1 >/dev/null 2>&1 && echo \"  OK  Internet     1.1.1.1\" || echo \"  XX  Internet     1.1.1.1  DOWN\"
-echo \"--- VLANs (Phase 3 pending) ---\"
-for spec in \"10:Admin\" \"20:POS\" \"30:GGLeap\" \"40:PearsonVUE\" \"50:Streaming\" \"60:Tutoring\" \"70:Cameras\" \"80:NAS\"; do
-  v=\$(echo \$spec | cut -d: -f1); n=\$(echo \$spec | cut -d: -f2)
-  gw=\"10.10.\${v}.1\"
-  ping -c1 -W1 \$gw >/dev/null 2>&1 && echo \"  OK  VLAN\$v \$n  \$gw\" || echo \"  --  VLAN\$v \$n  \$gw  (not configured)\"
-done
-echo \"--- QoS Tiers ---\"
-echo \"  Tier1(EF):  VLAN 10,30,50  Critical/Gaming/Streaming\"
-echo \"  Tier2(AF41): VLAN 40,70    Testing/Cameras\"
-echo \"  Tier3(AF21): VLAN 20,60    POS/Tutoring\"
-echo \"  Tier4(CS1):  VLAN 80       Bulk/Tor/I2P\"'" Enter
+ping -c1 -W2 $ROUTER_IP >/dev/null 2>&1 && echo \"  OK  Router       $ROUTER_IP\" || echo \"  XX  Router       $ROUTER_IP  DOWN\"
+ping -c1 -W2 $INTERNET_TEST_IP >/dev/null 2>&1 && echo \"  OK  Internet     $INTERNET_TEST_IP\" || echo \"  XX  Internet     $INTERNET_TEST_IP  DOWN\"
+VLANS=\"$VLANS\"
+if [ -n \"\$VLANS\" ]; then
+  echo \"--- VLANs ---\"
+  for spec in \$VLANS; do
+    v=\$(echo \$spec | cut -d: -f1); n=\$(echo \$spec | cut -d: -f2); gw=\$(echo \$spec | cut -d: -f3)
+    ping -c1 -W1 \$gw >/dev/null 2>&1 && echo \"  OK  VLAN\$v \$n  \$gw\" || echo \"  --  VLAN\$v \$n  \$gw\"
+  done
+fi'" Enter
 
 # Pane 1: SmokePing
 tmux split-window -t "$SESSION:network" -h
@@ -205,16 +194,13 @@ else
   echo 'Install: sudo apt-get install -y smokeping'
   echo ''
   echo 'Targets for /etc/smokeping/config.d/Targets:'
-  echo '  + Router       192.168.1.1    (core)'
-  echo '  + Internet     1.1.1.1        (WAN)'
-  echo '  + VLAN10-Admin 10.10.10.1     (this machine gateway)'
-  echo '  + VLAN20-POS   10.10.20.1'
-  echo '  + VLAN30-GGLeap 10.10.30.1   (low latency critical)'
-  echo '  + VLAN40-PVue  10.10.40.1    (strict isolation)'
-  echo '  + VLAN50-Stream 10.10.50.1   (low latency critical)'
-  echo '  + VLAN60-Tutor 10.10.60.1'
-  echo '  + VLAN70-Cam   10.10.70.1    (no internet)'
-  echo '  + VLAN80-NAS   10.10.80.1    (bulk/Tor/I2P)'
+  echo \"  + Router       $ROUTER_IP\"
+  echo \"  + Internet     $INTERNET_TEST_IP\"
+  VLANS=\"$VLANS\"
+  for spec in \$VLANS; do
+    v=\$(echo \$spec | cut -d: -f1); n=\$(echo \$spec | cut -d: -f2); gw=\$(echo \$spec | cut -d: -f3)
+    echo \"  + VLAN\${v}-\${n}  \$gw\"
+  done
 fi" Enter
 
 # Pane 2: LibreNMS + GenieACS/TR-069
@@ -249,10 +235,10 @@ done" Enter
 tmux split-window -t "$SESSION:network.1" -v
 tmux send-keys -t "$SESSION:network.3" "\
 watch -n30 'echo \"=== DNS Stack Status ===\"
-echo \"--- Unbound instances ---\"
-nc -z localhost 53 2>/dev/null && echo \"  OK  Main resolver      :53\" || echo \"  --  Main resolver      :53  (not started)\"
-nc -z localhost 5353 2>/dev/null && echo \"  OK  PearsonVUE whitelist :5353\" || echo \"  --  PearsonVUE whitelist :5353  (not started)\"
-nc -z localhost 5354 2>/dev/null && echo \"  OK  Camera internal    :5354\" || echo \"  --  Camera internal    :5354  (not started)\"
+echo \"--- DNS instances ---\"
+nc -z localhost $DNS_MAIN_PORT 2>/dev/null && echo \"  OK  Main resolver      :$DNS_MAIN_PORT\" || echo \"  --  Main resolver      :$DNS_MAIN_PORT  (not started)\"
+nc -z localhost $DNS_WHITELIST_PORT 2>/dev/null && echo \"  OK  Whitelist resolver  :$DNS_WHITELIST_PORT\" || echo \"  --  Whitelist resolver  :$DNS_WHITELIST_PORT  (not started)\"
+nc -z localhost $DNS_INTERNAL_PORT 2>/dev/null && echo \"  OK  Internal resolver   :$DNS_INTERNAL_PORT\" || echo \"  --  Internal resolver   :$DNS_INTERNAL_PORT  (not started)\"
 echo \"--- DNSCrypt ---\"
 pgrep -x dnscrypt-proxy >/dev/null 2>&1 && echo \"  OK  dnscrypt-proxy running\" || echo \"  --  dnscrypt-proxy not running\"
 echo
@@ -338,7 +324,7 @@ tmux new-window -t "$SESSION:5" -n "health"
 # Pane 0: Comprehensive service health (all ports from TOOLS.md)
 tmux send-keys -t "$SESSION:health.0" "\
 watch -n15 'echo \"=== Full Service Health ===\"
-for svc in \"OpenClaw-GW:18789\" \"OpenClaw-API:18792\" \"SSH:22\" \"Tor-SOCKS:9050\" \"ActivityWatch:5600\" \"Uptime-Kuma:3001\" \"Inspector:6274\" \"Unbound-main:53\" \"Unbound-PVue:5353\" \"Unbound-cam:5354\" \"i2pd-web:7070\" \"i2pd-HTTP:4444\" \"i2pd-SOCKS:4447\" \"i2pd-SAM:6668\" \"RPC:111\" \"SMB:445\" \"iperf3:5201\"; do
+for svc in $SERVICES \"OpenClaw-API:$OPENCLAW_API_PORT\" \"Unbound-main:$DNS_MAIN_PORT\" \"Unbound-alt:$DNS_WHITELIST_PORT\"; do
   name=\$(echo \$svc | cut -d: -f1)
   port=\$(echo \$svc | cut -d: -f2)
   nc -z localhost \$port 2>/dev/null && echo \"  OK  \$name (:\$port)\" || echo \"  --  \$name (:\$port)\"
@@ -457,13 +443,13 @@ tmux set-option -t "$SESSION" status-position bottom
 tmux set-option -t "$SESSION" status-style "bg=colour235,fg=colour250"
 tmux set-option -t "$SESSION" status-left-length 30
 tmux set-option -t "$SESSION" status-right-length 120
-tmux set-option -t "$SESSION" status-left "#[fg=colour46,bold]PERIDOT #[fg=colour250]| "
+tmux set-option -t "$SESSION" status-left "#[fg=colour46,bold]${PERIDOT_NAME^^} #[fg=colour250]| "
 tmux set-option -t "$SESSION" status-right \
   "#[fg=colour226] Win: C-b [0-6] #[fg=colour250]| Pane: C-b arrow #[fg=colour250]| Zoom: C-b z #[fg=colour250]| Detach: C-b d #[fg=colour46]| %H:%M"
 tmux set-option -t "$SESSION" pane-border-status top
 tmux set-option -t "$SESSION" pane-border-format " #[bold]#{pane_title} "
 
-tmux select-window -t "$SESSION:peridot"
+tmux select-window -t "$SESSION:$PERIDOT_NAME"
 
 # ═══════════════════════════════════════════════════════════════════
 # Summary

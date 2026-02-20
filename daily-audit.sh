@@ -4,14 +4,15 @@
 
 set -euo pipefail
 
-LOG="$HOME/workspace/logs/daily-audit.log"
-NOTIFY="$HOME/.local/bin/notify-me"
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+source "$SCRIPT_DIR/lib/load-config.sh"
+
+LOG="$LOGDIR/daily-audit.log"
 
 log() { echo "[$(date '+%Y-%m-%d %H:%M:%S')] $*" >> "$LOG"; }
 log "=== DAILY AUDIT START ==="
 
 ISSUES=()
-SUMMARY=""
 
 # 1. Disk space
 while IFS= read -r line; do
@@ -27,17 +28,17 @@ log "Disk: OK"
 
 # 2. Memory
 MEM_FREE=$(free -m | awk '/^Mem:/{print $7}')
-if [ "$MEM_FREE" -lt 512 ]; then
+if [ "$MEM_FREE" -lt "$MEM_WARN_MB" ]; then
     msg="LOW MEMORY: ${MEM_FREE}MB available"
     log "WARN: $msg"
     ISSUES+=("$msg")
 fi
 log "Memory: ${MEM_FREE}MB free"
 
-# 3. Services
-for svc in "OpenClaw:18789" "SSH:22" "Tor:9050"; do
-    name=$(echo "$svc" | cut -d: -f1)
-    port=$(echo "$svc" | cut -d: -f2)
+# 3. Services (from config)
+for entry in $SERVICES; do
+    name=$(echo "$entry" | cut -d: -f1)
+    port=$(echo "$entry" | cut -d: -f2)
     if ! nc -z 127.0.0.1 "$port" 2>/dev/null; then
         msg="SERVICE DOWN: $name (port $port)"
         log "WARN: $msg"
@@ -47,21 +48,27 @@ done
 log "Services: checked"
 
 # 4. Router reachable
-if ! ping -c1 -W2 192.168.1.1 > /dev/null 2>&1; then
-    ISSUES+=("ROUTER UNREACHABLE: 192.168.1.1")
+if ! ping -c1 -W2 "$ROUTER_IP" > /dev/null 2>&1; then
+    ISSUES+=("ROUTER UNREACHABLE: $ROUTER_IP")
     log "WARN: router unreachable"
 fi
 
-# 5. Tor circuit
-TOR_STATUS=$(curl -s --socks5 127.0.0.1:9050 https://check.torproject.org/api/ip 2>/dev/null | python3 -c "import json,sys; d=json.load(sys.stdin); print('Tor:' + str(d.get('IsTor',False)))" 2>/dev/null || echo "Tor:check-failed")
-log "Tor circuit: $TOR_STATUS"
+# 5. Tor circuit (if Tor is in services)
+if echo "$SERVICES" | grep -q "Tor:"; then
+    TOR_PORT=$(echo "$SERVICES" | tr ' ' '\n' | grep "^Tor:" | cut -d: -f2)
+    TOR_STATUS=$(curl -s --socks5 "127.0.0.1:$TOR_PORT" https://check.torproject.org/api/ip 2>/dev/null \
+        | python3 -c "import json,sys; d=json.load(sys.stdin); print('Tor:' + str(d.get('IsTor',False)))" 2>/dev/null \
+        || echo "Tor:check-failed")
+    log "Tor circuit: $TOR_STATUS"
+fi
 
-# 6. Lan-watcher DB — issues in last 24h
-DB="$HOME/workspace/clopus-watcher/data/lan-watcher.db"
-if [ -f "$DB" ]; then
-    DOWN_COUNT=$(sqlite3 "$DB" "SELECT COUNT(*) FROM checks WHERE status='down' AND checked_at > datetime('now','-24 hours');" 2>/dev/null || echo "0")
+# 6. LAN watcher DB — issues in last 24h
+if [ -f "$LW_DB" ]; then
+    DOWN_COUNT=$(sqlite3 "$LW_DB" \
+        "SELECT COUNT(*) FROM checks WHERE status='down' AND checked_at > datetime('now','-24 hours');" \
+        2>/dev/null || echo "0")
     log "LAN issues (24h): $DOWN_COUNT"
-    if [ "$DOWN_COUNT" -gt 50 ]; then
+    if [ "$DOWN_COUNT" -gt "$DOWN_EVENT_THRESHOLD" ]; then
         ISSUES+=("HIGH DOWN EVENTS: $DOWN_COUNT in last 24h")
     fi
 fi
@@ -76,6 +83,6 @@ else
     log "=== ISSUES: ${ISSUES[*]} ==="
 fi
 
-# 8. Send ntfy summary
-"$NOTIFY" "$SUMMARY" "Daily LAN Audit" "default" 2>/dev/null || true
+# 8. Send notification
+notify "$SUMMARY" "Daily Audit" "default"
 log "=== DAILY AUDIT END ==="

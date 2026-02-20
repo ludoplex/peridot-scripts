@@ -1,21 +1,22 @@
 #!/bin/bash
 # heartbeat-trigger.sh — runs every 15 minutes via cron
-# POSTs HEARTBEAT.md prompt to openclaw main agent
+# POSTs HEARTBEAT.md prompt to openclaw agent
 
 set -euo pipefail
 
-OPENCLAW_JSON="$HOME/.openclaw/openclaw.json"
-HEARTBEAT="$HOME/.openclaw/workspace/HEARTBEAT.md"
-LOG="$HOME/workspace/logs/heartbeat.log"
-NOTIFY="$HOME/.local/bin/notify-me"
-GATEWAY="http://127.0.0.1:18789"
-AGENT_ID="main"
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+source "$SCRIPT_DIR/lib/load-config.sh"
+
+OPENCLAW_JSON="$OC_HOME/openclaw.json"
+HEARTBEAT="$OC_WORKSPACE/HEARTBEAT.md"
+LOG="$LOGDIR/heartbeat.log"
+GATEWAY="http://127.0.0.1:${OPENCLAW_GW_PORT}"
 
 log() { echo "[$(date '+%Y-%m-%d %H:%M:%S')] $*" >> "$LOG"; }
 
-# Quiet hours: 23:00–07:00 skip non-critical
+# Quiet hours
 hour=$(date +%H)
-if [ "$hour" -ge 23 ] || [ "$hour" -lt 7 ]; then
+if [ "$hour" -ge "$QUIET_HOUR_START" ] || [ "$hour" -lt "$QUIET_HOUR_END" ]; then
     log "QUIET HOURS — skipping heartbeat"
     exit 0
 fi
@@ -43,10 +44,10 @@ if [ -f "$HEARTBEAT" ]; then
 $CONTENT"
 fi
 
-# Check openclaw is alive first
+# Check openclaw is alive
 if ! curl -sf "$GATEWAY/api/health" > /dev/null 2>&1; then
     log "WARN: openclaw gateway not responding"
-    "$NOTIFY" "OpenClaw gateway down — heartbeat skipped" "Heartbeat Warning" "high" 2>/dev/null || true
+    notify "OpenClaw gateway down — heartbeat skipped" "Heartbeat Warning" "high"
     exit 1
 fi
 
@@ -56,7 +57,7 @@ RESPONSE=$(curl -sf \
     -H "Content-Type: application/json" \
     -H "Authorization: Bearer $TOKEN" \
     -d "$PAYLOAD" \
-    "$GATEWAY/api/agents/$AGENT_ID/message" 2>&1) || {
+    "$GATEWAY/api/agents/${PERIDOT_AGENT_ID}/message" 2>&1) || {
     log "ERROR: POST to openclaw failed: $RESPONSE"
     exit 1
 }
@@ -66,7 +67,7 @@ log "HEARTBEAT SENT — response: ${RESPONSE:0:100}"
 # Update heartbeat state
 python3 -c "
 import json, time, os
-state_file = os.path.expanduser('~/.openclaw/workspace/memory/heartbeat-state.json')
+state_file = os.path.expanduser('$OC_WORKSPACE/memory/heartbeat-state.json')
 state = {}
 try:
     with open(state_file) as f:

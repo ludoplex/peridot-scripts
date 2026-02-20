@@ -1,0 +1,119 @@
+# peridot.conf — Central configuration for all peridot scripts
+# Copy to ~/.config/peridot/peridot.conf and customize.
+# All scripts source this file. Values here override built-in defaults.
+#
+# Lines starting with # are comments. Empty values fall back to defaults.
+
+# ── Identity ──────────────────────────────────────────────────
+PERIDOT_NAME="peridot"                    # Agent name (used in tmux, GPG, labels)
+PERIDOT_EMAIL="peridot@mx.local"          # GPG key email
+PERIDOT_AGENT_ID="main"                   # OpenClaw agent ID
+
+# ── Network ───────────────────────────────────────────────────
+ROUTER_IP="192.168.1.1"                   # Default gateway / router
+INTERNET_TEST_IP="1.1.1.1"               # IP to ping for WAN connectivity
+LAN_SUBNET="192.168.1.0/24"              # Local network CIDR
+
+# ── VLANs (space-separated ID:NAME:GATEWAY entries) ──────────
+# Format: "VLANID:LABEL:GATEWAY_IP"
+# Remove or modify entries to match your network.
+VLANS="10:Admin:10.10.10.1 20:POS:10.10.20.1 30:GGLeap:10.10.30.1 40:PearsonVUE:10.10.40.1 50:Streaming:10.10.50.1 60:Tutoring:10.10.60.1 70:Cameras:10.10.70.1 80:NAS:10.10.80.1"
+
+# ── Services (space-separated NAME:PORT entries) ──────────────
+# Used by health checks, boot-ensure, tmux workspace.
+SERVICES="OpenClaw:18789 SSH:22 Tor:9050 ActivityWatch:5600 Uptime-Kuma:3001 Inspector:6274"
+OPENCLAW_GW_PORT="18789"
+OPENCLAW_API_PORT="18792"
+
+# ── DNS Stack ─────────────────────────────────────────────────
+DNS_MAIN_PORT="53"
+DNS_WHITELIST_PORT="5353"                 # PearsonVUE whitelist resolver
+DNS_INTERNAL_PORT="5354"                  # Camera-only internal resolver
+
+# ── Paths ─────────────────────────────────────────────────────
+WORKSPACE="$HOME/workspace"
+LOGDIR="$WORKSPACE/logs"
+SCRIPTS_DIR="$WORKSPACE/scripts"
+OC_HOME="$HOME/.openclaw"
+OC_WORKSPACE="$OC_HOME/workspace"
+CRED_DIR="$OC_HOME/credentials"
+
+# Service directories (set to "" to disable a service pane)
+AW_DIR="$WORKSPACE/activitywatch"
+KUMA_DIR="$WORKSPACE/uptime-kuma"
+INSPECTOR_DIR="$WORKSPACE/inspector"
+OPENSPEC_DIR="$WORKSPACE/OpenSpec"
+MEM0_DIR="$WORKSPACE/mem0"
+LIBRENMS_DIR="$WORKSPACE/librenms"
+CLOPUS_DIR="$WORKSPACE/clopus-watcher"
+LW_DB="$CLOPUS_DIR/data/lan-watcher.db"
+LW_BIN="$CLOPUS_DIR/bin/lan-watcher"
+LW_CONFIG="$CLOPUS_DIR/config/lan-config.yaml"
+
+# ── Notification ──────────────────────────────────────────────
+NOTIFY_CMD="$HOME/.local/bin/notify-me"   # Notification script/binary
+NOTIFY_TITLE_PREFIX=""                    # Prefix for ntfy titles (e.g. "mx")
+
+# ── Security / Key Vault ─────────────────────────────────────
+PASS_PREFIX="mx"                          # pass store prefix (mx/user, mx/root)
+PW_LENGTH="32"                            # Generated password length
+GPG_NAME="$PERIDOT_NAME"                  # GPG key real name
+GPG_EMAIL="$PERIDOT_EMAIL"                # GPG key email
+
+VAULT_FILE="vault.luks"                   # LUKS container filename
+VAULT_SIZE_MB="64"                        # LUKS container size
+LUKS_NAME="${PERIDOT_NAME}-keys"          # dm-crypt mapped name
+LUKS_LABEL="${PERIDOT_NAME^^}-KEYS"       # ext4 label inside LUKS
+YUBIKEY_SLOT="2"                          # HMAC-SHA1 slot (1=short press, 2=long press)
+
+KEY_RELEASE="$HOME/.local/bin/key-release"
+KEY_LOCK="$HOME/.local/bin/key-lock"
+SUDO_WRAP="$HOME/.local/bin/sudo-wrap"
+LIVE_GNUPG="/dev/shm/.gnupg-live"
+ENV_FILE="$HOME/.gnupg-live-env"
+
+# External storage (auto-detected if empty)
+USB_DEVICE=""                             # e.g. /dev/sdb1 — leave empty to auto-detect
+USB_MOUNT=""                              # e.g. /mnt/transcend — leave empty for /mnt/<label>
+VAULT_DIR=""                              # e.g. /mnt/transcend/peridot-vault — auto if empty
+
+# ── TTL Tiers (minutes) ──────────────────────────────────────
+TTL_HIGH_PRIV="1"                         # root, chpasswd, firewall changes
+TTL_ELEVATED="3"                          # sudo operations
+TTL_STANDARD="5"                          # pass decrypt, general use
+
+# ── Operational Rhythms ───────────────────────────────────────
+QUIET_HOUR_START="23"                     # Quiet hours start (24h)
+QUIET_HOUR_END="7"                        # Quiet hours end (24h)
+MEM_WARN_MB="512"                         # Low memory warning threshold
+LOG_ROTATE_BYTES="10485760"               # 10MB log rotation threshold
+DOWN_EVENT_THRESHOLD="50"                 # LAN watcher alert threshold (24h)
+
+# ── Autotype ──────────────────────────────────────────────────
+XDOTOOL_DELAY_MS="20"                     # Keystroke delay for xdotool
+XDOTOOL_PRE_DELAY="0.3"                  # Delay before typing (focus window)
+CLIPBOARD_TTL="10"                        # Seconds to keep password on clipboard
+
+# ── tmux ──────────────────────────────────────────────────────
+TMUX_SESSION="$PERIDOT_NAME"
+TMUX_WIDTH="220"
+TMUX_HEIGHT="55"
+
+# ── ActivityWatch ─────────────────────────────────────────────
+AW_VERSION="0.13.2"
+AW_PORT="5600"
+AW_DOWNLOAD_URL="https://github.com/ActivityWatch/activitywatch/releases/download/v${AW_VERSION}/activitywatch-v${AW_VERSION}-linux-x86_64.zip"
+
+# ── OpenClaw Gateway Log ─────────────────────────────────────
+# Searched in order; first existing file wins.
+OC_LOG_PATHS="/tmp/openclaw-gateway.log /tmp/openclaw-$(id -u)/openclaw-\$(date +%Y-%m-%d).log"
+
+# ── Inter-VLAN / NDI ─────────────────────────────────────────
+NDI_PORT_RANGE="5960-5969"
+NDI_VLAN_PAIR="30:50"                     # VLANs allowed NDI cross-traffic
+MULTICAST_RANGE="239.255.0.0/16"
+IGMP_CONFIG="$WORKSPACE/configs/igmpproxy.conf"
+
+# ── Session Converter ────────────────────────────────────────
+CONVERTER_DEFAULT_MODEL="claude-opus-4-6"
+CONVERTER_DEFAULT_CWD="$HOME"

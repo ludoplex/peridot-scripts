@@ -4,32 +4,32 @@
 
 set -euo pipefail
 
-BINARY="$HOME/workspace/clopus-watcher/bin/lan-watcher"
-CONFIG="$HOME/workspace/clopus-watcher/config/lan-config.yaml"
-LOG="$HOME/workspace/logs/lan-watcher.log"
-NOTIFY="$HOME/.local/bin/notify-me"
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+source "$SCRIPT_DIR/lib/load-config.sh"
+
+LOG="$LOGDIR/lan-watcher.log"
 
 log() { echo "[$(date '+%Y-%m-%d %H:%M:%S')] $*" >> "$LOG"; }
 
-# Rotate log if over 10MB
-if [ -f "$LOG" ] && [ "$(stat -c%s "$LOG" 2>/dev/null || echo 0)" -gt 10485760 ]; then
+# Rotate log if over threshold
+if [ -f "$LOG" ] && [ "$(stat -c%s "$LOG" 2>/dev/null || echo 0)" -gt "$LOG_ROTATE_BYTES" ]; then
     mv "$LOG" "${LOG}.1"
 fi
 
 log "START"
 
-if [ ! -x "$BINARY" ]; then
-    log "ERROR: binary not found or not executable: $BINARY"
-    "$NOTIFY" "lan-watcher binary missing: $BINARY" "LAN Watcher Error" "urgent" 2>/dev/null || true
+if [ ! -x "$LW_BIN" ]; then
+    log "ERROR: binary not found or not executable: $LW_BIN"
+    notify "lan-watcher binary missing: $LW_BIN" "LAN Watcher Error" "urgent"
     exit 1
 fi
 
 # Run with timeout, capture output
-output=$("$BINARY" --config "$CONFIG" 2>&1) || {
+output=$("$LW_BIN" --config "$LW_CONFIG" 2>&1) || {
     code=$?
     log "ERROR: binary exited $code"
     log "$output"
-    "$NOTIFY" "lan-watcher exited with code $code" "LAN Watcher Error" "high" 2>/dev/null || true
+    notify "lan-watcher exited with code $code" "LAN Watcher Error" "high"
     exit $code
 }
 

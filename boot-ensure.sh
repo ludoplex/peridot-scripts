@@ -1,9 +1,11 @@
 #!/bin/bash
 # boot-ensure.sh — runs @reboot (after 30s delay via cron)
-# Checks all services after boot, sends ntfy status
+# Checks all configured services after boot, sends ntfy status
 
-NOTIFY="$HOME/.local/bin/notify-me"
-LOG="$HOME/workspace/logs/boot-ensure.log"
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+source "$SCRIPT_DIR/lib/load-config.sh"
+
+LOG="$LOGDIR/boot-ensure.log"
 
 log() { echo "[$(date '+%Y-%m-%d %H:%M:%S')] $*" >> "$LOG"; }
 log "Boot check starting"
@@ -22,12 +24,15 @@ check() {
     fi
 }
 
-check "OpenClaw" 18789
-check "SSH" 22
-check "Tor" 9050
+# Check all configured services
+for entry in $SERVICES; do
+    name=$(echo "$entry" | cut -d: -f1)
+    port=$(echo "$entry" | cut -d: -f2)
+    check "$name" "$port"
+done
 
 ROUTER_STATUS="UP"
-ping -c1 -W3 192.168.1.1 > /dev/null 2>&1 || ROUTER_STATUS="DOWN"
+ping -c1 -W3 "$ROUTER_IP" > /dev/null 2>&1 || ROUTER_STATUS="DOWN"
 
 MSG="Boot: UP=[$(IFS=','; echo "${UP[*]}")] DOWN=[$(IFS=','; echo "${DOWN[*]}")] Router=$ROUTER_STATUS"
 log "$MSG"
@@ -35,4 +40,4 @@ log "$MSG"
 PRIORITY="default"
 [ ${#DOWN[@]} -gt 0 ] && PRIORITY="high"
 
-"$NOTIFY" "$MSG" "mx Boot Status" "$PRIORITY" 2>/dev/null || true
+notify "$MSG" "Boot Status" "$PRIORITY"
