@@ -21,9 +21,20 @@ sleep 1
 env -u CLAUDECODE -u CLAUDE_CODE_ENTRYPOINT \
   tmux new-session -d -s "$SESSION" -n "$PERIDOT_NAME" -x "$TMUX_WIDTH" -y "$TMUX_HEIGHT"
 
-tmux send-keys -t "$SESSION:$PERIDOT_NAME" "echo 'PERIDOT — OpenClaw Agent (C-b 0)'" Enter
-tmux send-keys -t "$SESSION:$PERIDOT_NAME" "echo '  openclaw agent -m \"message\"   — talk to agent'" Enter
-tmux send-keys -t "$SESSION:$PERIDOT_NAME" "echo '  openclaw dashboard            — web UI'" Enter
+tmux send-keys -t "$SESSION:$PERIDOT_NAME" "\
+DASH_URL=\$(openclaw dashboard --no-open 2>&1 | grep -oE 'http[s]?://[^ ]+' | head -1)
+echo '══════════════════════════════════════════'
+echo ' PERIDOT — OpenClaw Agent Dashboard'
+echo '══════════════════════════════════════════'
+echo ''
+echo \"  Dashboard: \${DASH_URL:-http://localhost:${OPENCLAW_GW_PORT}}\"
+echo '  CLI:       openclaw agent -m \"message\"'
+echo '  Health:    openclaw health'
+echo '  Sessions:  openclaw sessions'
+echo ''
+echo '  Gateway log:'
+echo '────────────────────────────────────────'
+tail -f /tmp/openclaw-gateway.log /tmp/openclaw/openclaw-\$(date +%Y-%m-%d).log 2>/dev/null" Enter
 
 # ═══════════════════════════════════════════════════════════════════
 # WINDOW 1: services — Core monitoring stack
@@ -379,17 +390,28 @@ echo ''
 echo '--- Media Server ---'
 [ -d ~/workspace/jellyfin ] && echo '  Jellyfin: ~/workspace/jellyfin (cloned)' || echo '  Jellyfin: not cloned'" Enter
 
-# Pane 3: LAN watcher log (live tail)
+# Pane 3: Gateway watchdog status
 tmux split-window -t "$SESSION:health.1" -v
 tmux send-keys -t "$SESSION:health.3" "\
-echo '[LAN] LAN Watcher Live Log'
-touch $LOGDIR/lan-watcher.log
-echo 'Binary: ~/workspace/clopus-watcher/bin/lan-watcher'
-echo 'Config: ~/workspace/clopus-watcher/config/lan-config.yaml'
-echo 'DB:     $LW_DB'
-echo 'Cron:   every 5 minutes'
-echo '--- Live log ---'
-tail -f $LOGDIR/lan-watcher.log" Enter
+watch -n10 'echo \"=== Gateway Daemon ===\"
+PIDFILE=\$HOME/.openclaw/run/gateway.pid
+if [ -f \"\$PIDFILE\" ] && kill -0 \$(cat \"\$PIDFILE\" 2>/dev/null) 2>/dev/null; then
+  PID=\$(cat \"\$PIDFILE\")
+  UP=\$(ps -o etimes= -p \$PID 2>/dev/null | tr -d \" \")
+  echo \"  PID:    \$PID\"
+  echo \"  Port:   $OPENCLAW_GW_PORT\"
+  echo \"  Uptime: \${UP}s\"
+  echo \"  Status: RUNNING\"
+else
+  echo \"  Status: DOWN\"
+  echo \"  Watchdog will restart within 60s\"
+fi
+echo
+echo \"=== Last Restart ===\"
+tail -3 \$HOME/workspace/logs/gateway-watchdog.log 2>/dev/null || echo \"  No watchdog log yet\"
+echo
+echo \"=== Gateway Log (last 5) ===\"
+tail -5 /tmp/openclaw-gateway.log 2>/dev/null | sed \"s/\\x1b\\[[0-9;]*m//g\"'" Enter
 
 tmux select-layout -t "$SESSION:health" tiled
 
@@ -438,7 +460,7 @@ tmux select-pane -t "$SESSION:memory.3" -T "[SPEC] OpenSpec"
 tmux select-pane -t "$SESSION:health.0" -T "[PORTS] All Services"
 tmux select-pane -t "$SESSION:health.1" -T "[OC] Sessions & Gateway"
 tmux select-pane -t "$SESSION:health.2" -T "[MEDIA] Streaming/NDI"
-tmux select-pane -t "$SESSION:health.3" -T "[LAN] Watcher Live Log"
+tmux select-pane -t "$SESSION:health.3" -T "[GW] Gateway Daemon"
 
 # ═══════════════════════════════════════════════════════════════════
 # Status bar
