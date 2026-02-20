@@ -118,32 +118,17 @@ echo
 echo \"=== LISTENING (0.0.0.0 — EXPOSED) ===\"
 ss -tlnp 2>/dev/null | grep \"0.0.0.0\" | grep -v 127'" Enter
 
-# Pane 1: Hardening status (no sudo — reads files + ss)
+# Pane 1: Process and connection monitor
 tmux split-window -t "$SESSION:monitor" -h
 tmux send-keys -t "$SESSION:monitor.1" "\
-watch -n30 'echo \"=== HARDENING STATUS ===\"
+watch -n5 'echo \"=== Top Processes (CPU) ===\"
+ps aux --sort=-%cpu | head -8
 echo
-echo \"--- SSH Config ---\"
-grep -E \"^(Password|PermitRoot|Pubkey|Challenge)\" /etc/ssh/sshd_config 2>/dev/null || echo \"Cannot read sshd_config\"
+echo \"=== Active Connections ===\"
+ss -tnp 2>/dev/null | grep ESTAB | awk \"{print \\\"  \\\" \\\$4, \\\"<->\\\", \\\$5, \\\$6}\" | head -10
 echo
-echo \"--- Firewall ---\"
-if command -v ufw >/dev/null 2>&1; then
-  if [ -f /etc/ufw/user.rules ]; then
-    echo \"UFW rules found:\"
-    grep -c \"^-A\" /etc/ufw/user.rules 2>/dev/null | xargs -I{} echo \"  {} rules defined\"
-    grep \"dport\" /etc/ufw/user.rules 2>/dev/null | head -8
-  else
-    echo \"UFW: NOT CONFIGURED\"
-  fi
-else
-  echo \"UFW: NOT INSTALLED\"
-fi
-echo
-echo \"--- Exposed Ports (0.0.0.0) ---\"
-ss -tlnp 2>/dev/null | grep \"0.0.0.0\" | grep -v 127 | awk \"{print \\\"  \\\" \\\$4, \\\$6}\" | head -10
-echo
-echo \"--- rpcbind ---\"
-ss -tlnp 2>/dev/null | grep \":111\" >/dev/null && echo \"  ACTIVE (should be disabled)\" || echo \"  disabled\"'" Enter
+echo \"=== Network I/O ===\"
+cat /proc/net/dev 2>/dev/null | awk \"NR>2 && \\\$2+0>0 {printf \\\"  %-10s RX: %10d  TX: %10d\n\\\", \\\$1, \\\$2, \\\$10}\"'" Enter
 
 # Pane 2: LAN Watcher log
 tmux split-window -t "$SESSION:monitor.0" -v
@@ -219,9 +204,90 @@ ls -lt ~/workspace/logs/*.log 2>/dev/null | head -5'" Enter
 tmux select-layout -t "$SESSION:memory" tiled
 
 # ─────────────────────────────────────────────────────────────────
-# WINDOW 4: shell — general shell for commands
+# WINDOW 4: network — SmokePing + LibreNMS + network tools
 # ─────────────────────────────────────────────────────────────────
-tmux new-window -t "$SESSION:4" -n "shell"
+tmux new-window -t "$SESSION:4" -n "network"
+
+# Pane 0: SmokePing status
+tmux send-keys -t "$SESSION:network.0" "\
+echo '[SMOKE] SmokePing — http://localhost/cgi-bin/smokeping.cgi'
+if command -v smokeping >/dev/null 2>&1; then
+  echo 'SmokePing installed. Checking config...'
+  smokeping --check 2>&1 || echo 'Config check failed'
+  echo 'Tailing SmokePing log...'
+  tail -f /var/log/smokeping/smokeping.log 2>/dev/null || tail -f /var/log/syslog 2>/dev/null | grep -i smoke
+else
+  echo 'SmokePing NOT INSTALLED'
+  echo 'Install: sudo apt-get install -y smokeping'
+  echo ''
+  echo 'After install, configure targets in /etc/smokeping/config.d/Targets'
+  echo 'Key targets for multi-VLAN:'
+  echo '  + Router      192.168.1.1'
+  echo '  + VLAN10-GW   10.10.10.1   (Admin)'
+  echo '  + VLAN20-GW   10.10.20.1   (POS)'
+  echo '  + VLAN30-GW   10.10.30.1   (GGLeap)'
+  echo '  + VLAN40-GW   10.10.40.1   (PearsonVue)'
+  echo '  + VLAN50-GW   10.10.50.1   (Streaming)'
+  echo '  + VLAN60-GW   10.10.60.1   (Tutoring)'
+  echo '  + VLAN70-GW   10.10.70.1   (Security)'
+  echo '  + VLAN80-GW   10.10.80.1   (NAS)'
+fi" Enter
+
+# Pane 1: LibreNMS status
+tmux split-window -t "$SESSION:network" -h
+tmux send-keys -t "$SESSION:network.1" "\
+echo '[LIBRE] LibreNMS — network monitoring'
+if [ -d '$HOME/workspace/librenms' ]; then
+  echo 'LibreNMS repo present at ~/workspace/librenms'
+  echo 'Web UI: http://localhost/librenms (after setup)'
+  echo ''
+  echo 'Status: Check if running...'
+  nc -z localhost 80 2>/dev/null && echo '  HTTP :80 UP' || echo '  HTTP :80 DOWN (not configured yet)'
+  echo ''
+  echo 'Quick setup: https://docs.librenms.org/Installation/Install-LibreNMS/'
+else
+  echo 'LibreNMS NOT CLONED'
+  echo 'Clone: git clone https://github.com/librenms/librenms ~/workspace/librenms'
+fi" Enter
+
+# Pane 2: Network ping dashboard
+tmux split-window -t "$SESSION:network.0" -v
+tmux send-keys -t "$SESSION:network.2" "\
+watch -n10 'echo \"=== Network Reachability ===\"
+echo \"--- Core ---\"
+ping -c1 -W2 192.168.1.1 >/dev/null 2>&1 && echo \"  OK Router (192.168.1.1)\" || echo \"  XX Router (192.168.1.1)\"
+ping -c1 -W2 1.1.1.1 >/dev/null 2>&1 && echo \"  OK Internet (1.1.1.1)\" || echo \"  XX Internet (1.1.1.1)\"
+echo \"--- VLAN Gateways ---\"
+for v in 10 20 30 40 50 60 70 80; do
+  gw=\"10.10.\${v}.1\"
+  ping -c1 -W1 \$gw >/dev/null 2>&1 && echo \"  OK VLAN\$v (\$gw)\" || echo \"  -- VLAN\$v (\$gw) unreachable\"
+done
+echo \"--- DNS ---\"
+dig +short +time=2 google.com 2>/dev/null | head -1 | xargs -I{} echo \"  OK DNS -> {}\" || echo \"  XX DNS failed\"'" Enter
+
+# Pane 3: Netmiko / network tools
+tmux split-window -t "$SESSION:network.1" -v
+tmux send-keys -t "$SESSION:network.3" "\
+echo '[NET] Network Tools'
+echo 'Available tools:'
+command -v nmap >/dev/null && echo '  nmap: installed' || echo '  nmap: NOT installed (apt install nmap)'
+command -v mtr >/dev/null && echo '  mtr: installed' || echo '  mtr: NOT installed (apt install mtr)'
+command -v iperf3 >/dev/null && echo '  iperf3: installed' || echo '  iperf3: NOT installed'
+command -v netmiko >/dev/null && echo '  netmiko: installed' || echo '  netmiko: ~/workspace/netmiko (not in PATH)'
+echo ''
+echo 'Quick commands:'
+echo '  nmap -sn 192.168.1.0/24     # LAN host scan'
+echo '  mtr -c5 192.168.1.1         # Traceroute to router'
+echo '  ss -tlnp                    # Listening ports'
+echo '  ip route show               # Routing table'
+echo '  ip addr show                # Interface IPs'" Enter
+
+tmux select-layout -t "$SESSION:network" tiled
+
+# ─────────────────────────────────────────────────────────────────
+# WINDOW 5: shell — general shell for commands
+# ─────────────────────────────────────────────────────────────────
+tmux new-window -t "$SESSION:5" -n "shell"
 tmux send-keys -t "$SESSION:shell" \
   "echo 'Shell — full access. Hardening script: bash /tmp/harden-mx.sh'" Enter
 
@@ -234,7 +300,7 @@ tmux select-pane -t "$SESSION:services.2" -T "[OC-GW] Gateway Log"
 tmux select-pane -t "$SESSION:services.3" -T "[INSP] Inspector :6274"
 
 tmux select-pane -t "$SESSION:monitor.0" -T "[SYS] System Stats"
-tmux select-pane -t "$SESSION:monitor.1" -T "[HARDEN] Security Status"
+tmux select-pane -t "$SESSION:monitor.1" -T "[CONN] Processes & Connections"
 tmux select-pane -t "$SESSION:monitor.2" -T "[LAN] Watcher Log"
 tmux select-pane -t "$SESSION:monitor.3" -T "[SPEC] OpenSpec"
 
@@ -242,6 +308,11 @@ tmux select-pane -t "$SESSION:memory.0" -T "[MEM0] mem0 REPL"
 tmux select-pane -t "$SESSION:memory.1" -T "[SOUL] Peridot SOUL.md"
 tmux select-pane -t "$SESSION:memory.2" -T "[NOTES] Today Notes"
 tmux select-pane -t "$SESSION:memory.3" -T "[HEALTH] Service Health"
+
+tmux select-pane -t "$SESSION:network.0" -T "[SMOKE] SmokePing"
+tmux select-pane -t "$SESSION:network.1" -T "[LIBRE] LibreNMS"
+tmux select-pane -t "$SESSION:network.2" -T "[PING] VLAN Reachability"
+tmux select-pane -t "$SESSION:network.3" -T "[NET] Network Tools"
 
 # ─────────────────────────────────────────────────────────────────
 # Status bar + key bindings
@@ -253,7 +324,7 @@ tmux set-option -t "$SESSION" status-left-length 30
 tmux set-option -t "$SESSION" status-right-length 120
 tmux set-option -t "$SESSION" status-left "#[fg=colour46,bold]PERIDOT #[fg=colour250]| "
 tmux set-option -t "$SESSION" status-right \
-  "#[fg=colour226] Win: C-b [0-4] #[fg=colour250]| Pane: C-b arrow #[fg=colour250]| Zoom: C-b z #[fg=colour250]| Detach: C-b d #[fg=colour46]| %H:%M"
+  "#[fg=colour226] Win: C-b [0-5] #[fg=colour250]| Pane: C-b arrow #[fg=colour250]| Zoom: C-b z #[fg=colour250]| Detach: C-b d #[fg=colour46]| %H:%M"
 tmux set-option -t "$SESSION" pane-border-status top
 tmux set-option -t "$SESSION" pane-border-format " #[bold]#{pane_title} "
 
@@ -271,9 +342,10 @@ echo ""
 echo " Windows (C-b [number]):"
 echo "  0: peridot    — OpenClaw agent chat"
 echo "  1: services   — AW | Kuma | OC-GW log | Inspector"
-echo "  2: monitor    — SysStats | Hardening | LAN | OpenSpec"
+echo "  2: monitor    — SysStats | Connections | LAN | OpenSpec"
 echo "  3: memory     — mem0 | SOUL | Notes | Health"
-echo "  4: shell      — general shell"
+echo "  4: network    — SmokePing | LibreNMS | VLAN Ping | Net Tools"
+echo "  5: shell      — general shell"
 echo ""
 echo " Pane navigation:"
 echo "  C-b arrow     — move between panes"
