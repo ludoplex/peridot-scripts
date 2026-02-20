@@ -17,8 +17,16 @@ sleep 1
 # ═══════════════════════════════════════════════════════════════════
 # WINDOW 0: peridot — OpenClaw agent chat (full window)
 # ═══════════════════════════════════════════════════════════════════
+# Strip Claude Code nesting vars so openclaw/claude can run inside tmux
+CLEAN_ENV="env -u CLAUDECODE -u CLAUDE_CODE_ENTRYPOINT"
+
 tmux new-session -d -s "$SESSION" -n "$PERIDOT_NAME" -x "$TMUX_WIDTH" -y "$TMUX_HEIGHT"
-tmux send-keys -t "$SESSION:$PERIDOT_NAME" "openclaw agent --agent $PERIDOT_AGENT_ID" Enter
+tmux set-environment -t "$SESSION" -u CLAUDECODE 2>/dev/null
+tmux set-environment -t "$SESSION" -u CLAUDE_CODE_ENTRYPOINT 2>/dev/null
+tmux send-keys -t "$SESSION:$PERIDOT_NAME" "unset CLAUDECODE CLAUDE_CODE_ENTRYPOINT" Enter
+tmux send-keys -t "$SESSION:$PERIDOT_NAME" "echo 'PERIDOT — OpenClaw Agent (C-b 0)'" Enter
+tmux send-keys -t "$SESSION:$PERIDOT_NAME" "echo '  openclaw agent -m \"message\"   — talk to agent'" Enter
+tmux send-keys -t "$SESSION:$PERIDOT_NAME" "echo '  openclaw dashboard            — web UI'" Enter
 
 # ═══════════════════════════════════════════════════════════════════
 # WINDOW 1: services — Core monitoring stack
